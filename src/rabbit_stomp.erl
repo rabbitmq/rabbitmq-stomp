@@ -57,9 +57,9 @@ start(Listeners) ->
 start_listeners([]) ->
     ok;
 start_listeners([{Host, Port} | More]) ->
-    {IPAddress, Name} = rabbit_networking:check_tcp_listener_address(rabbit_stomp_listener_sup,
-								     Host,
-								     Port),
+    {ok, IPAddress, Name} = rabbit_networking:check_tcp_listener_address(rabbit_stomp_listener_sup,
+									 Host,
+									 Port),
     {ok,_} = supervisor:start_child(
                rabbit_sup,
                {Name,
@@ -275,15 +275,15 @@ send_method(Method, Properties, Body, State = #state{channel = ChPid}) ->
     State.
 
 do_login({ok, Login}, {ok, Passcode}, VirtualHost, Realm, State) ->
-    U = rabbit_access_control:user_pass_login(list_to_binary(Login),
-					      list_to_binary(Passcode)),
+    {ok, U} = rabbit_access_control:user_pass_login(list_to_binary(Login),
+						    list_to_binary(Passcode)),
     ok = rabbit_access_control:check_vhost_access(U, list_to_binary(VirtualHost)),
     ChPid = 
 	rabbit_channel:start_link(self(), self(), U#user.username, list_to_binary(VirtualHost)),
     {ok, #'channel.open_ok'{}, State1} =
 	simple_method_sync_rpc(#'channel.open'{out_of_band = <<"">>},
 			       State#state{channel = ChPid}),
-    SessionId = rabbit_misc:string_guid("session"),
+    SessionId = rabbit_gensym:gensym("session"),
     {ok, #'access.request_ok'{ticket = Ticket}, State2} =
 	simple_method_sync_rpc(#'access.request'{realm = list_to_binary(Realm),
 						 exclusive = false,
