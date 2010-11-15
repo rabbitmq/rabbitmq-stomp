@@ -38,13 +38,13 @@
 -include_lib("amqp_client/include/amqp_client.hrl").
 -include("rabbit_stomp_frame.hrl").
 
--record(state, {socket, session_id, channel, connection, subscriptions}).
+-record(state, {transport, session_id, channel, connection, subscriptions}).
 
 %%----------------------------------------------------------------------------
 %% Public API
 %%----------------------------------------------------------------------------
-start_link(Sock) ->
-    gen_server:start_link(?MODULE, [Sock], []).
+start_link(Transport) ->
+    gen_server:start_link(?MODULE, [Transport], []).
 
 process_frame(Pid, Frame = #stomp_frame{command = Command}) ->
     gen_server:cast(Pid, {Command, Frame}).
@@ -53,11 +53,11 @@ process_frame(Pid, Frame = #stomp_frame{command = Command}) ->
 %% Basic gen_server callbacks
 %%----------------------------------------------------------------------------
 
-init([Sock]) ->
+init([Transport]) ->
     process_flag(trap_exit, true),
     {ok,
      #state {
-       socket        = Sock,
+       transport     = Transport,
        session_id    = none,
        channel       = none,
        connection    = none,
@@ -483,12 +483,12 @@ send_frame(Command, Headers, BodyFragments, State) ->
                             body_iolist = BodyFragments},
                State).
 
-send_frame(Frame, State = #state{socket = Sock}) ->
+send_frame(Frame, State = #state{transport = {Module, Arg}}) ->
     %% We ignore certain errors here, as we will be receiving an
     %% asynchronous notification of the same (or a related) fault
     %% shortly anyway. See bug 21365.
     %% io:format("Sending ~p~n", [Frame]),
-    case gen_tcp:send(Sock, rabbit_stomp_frame:serialize(Frame)) of
+    case Module:send_frame(rabbit_stomp_frame:serialize(Frame), Arg) of
         ok -> State;
         {error, closed} -> State;
         {error, enotconn} -> State;
