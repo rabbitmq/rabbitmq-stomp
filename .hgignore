@@ -1,9 +1,0 @@
-syntax: regexp
-\.pyc$
-\.beam$
-\.pyc$
-^dist/
-^build/
-^ebin/
-^tmp/
-^cover/
