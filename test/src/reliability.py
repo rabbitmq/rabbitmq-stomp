@@ -21,7 +21,7 @@ class TestReliability(base.BaseTest):
 
             for x in range(0, count):
                 pub_conn.send(msg + str(x), destination=d)
-            time.sleep(2.0)
+            #time.sleep(2.0)
             pub_conn.close_socket()
 
             if listener.await(30):
