@@ -1,6 +1,6 @@
 diff -r 16a4000624a7 stomp/connect.py
 --- a/stomp/connect.py	Sun May 02 18:15:34 2010 +0100
-+++ b/stomp/connect.py	Tue Aug 02 17:09:21 2011 +0100
++++ b/stomp/connect.py	Mon Aug 01 17:25:05 2011 +0100
 @@ -88,7 +88,10 @@
                   ssl_key_file = None,
                   ssl_cert_file = None,
@@ -46,56 +46,45 @@ diff -r 16a4000624a7 stomp/connect.py
          self.__socket = None
          self.__socket_semaphore = threading.BoundedSemaphore(1)
          self.__current_host_and_port = None
-@@ -382,28 +404,31 @@
-         Send a DISCONNECT frame to finish a connection
+@@ -383,6 +405,10 @@
          """
          self.__send_frame_helper('DISCONNECT', '', utils.merge_headers([self.__connect_headers, headers, keyword_headers]), [ ])
+         self.__running = False
 +        self.close_socket()
 +        self.__current_host_and_port = None
 +        
 +    def close_socket(self):
-         self.__running = False
--        if self.__socket is not None:
--            if self.__ssl:
-+        if self.__ssl:
-+            #
-+            # Even though we don't want to use the socket, unwrap is the only API method which does a proper SSL shutdown
-+            #
-+            try:
-+                self.__socket = self.__socket.unwrap()
-+            except Exception as e:
+         if self.__socket is not None:
+             if self.__ssl:
                  #
--                # Even though we don't want to use the socket, unwrap is the only API method which does a proper SSL shutdown
-+                # unwrap seems flaky on Win with the backported ssl mod, so catch any exception and log it
+@@ -390,20 +416,20 @@
                  #
--                try:
--                    self.__socket = self.__socket.unwrap()
+                 try:
+                     self.__socket = self.__socket.unwrap()
 -                except Exception:
--                    #
--                    # unwrap seems flaky on Win with the backported ssl mod, so catch any exception and log it
--                    #
++                except Exception as e:
+                     #
+                     # unwrap seems flaky on Win with the backported ssl mod, so catch any exception and log it
+                     #
 -                    _, e, _ = sys.exc_info()
 -                    log.warn(e)
--            elif hasattr(socket, 'SHUT_RDWR'):
-+                log.warning("socket unwrap() threw exception: %s" % e)
-+        #
-+        # caution, because sometimes the socket is nulled before this call
-+        #
-+        try:
-+            if hasattr(socket, 'SHUT_RDWR'):
++                    log.warning("socket unwrap() threw exception: %s" % e)
+             elif hasattr(socket, 'SHUT_RDWR'):
                  self.__socket.shutdown(socket.SHUT_RDWR)
--        #
+         #
 -        # split this into a separate check, because sometimes the socket is nulled between shutdown and this call
--        #
++        # caution, because sometimes the socket is nulled between shutdown and this call
+         #
 -        if self.__socket is not None:
++        try:
              self.__socket.close()
 -        self.__current_host_and_port = None
 +        except Exception as e:
-+            log.warning("socket close() or shutdown() threw exception: %s" % e)
++            log.warning("socket close() threw exception: %s" % e)
  
      def __convert_dict(self, payload):
          """
-@@ -449,6 +474,9 @@
+@@ -449,6 +475,9 @@
                  raise KeyError("Command %s requires header %r" % (command, required_header_key))
          self.__send_frame(command, headers, payload)
  
@@ -105,7 +94,7 @@ diff -r 16a4000624a7 stomp/connect.py
      def __send_frame(self, command, headers={}, payload=''):
          """
          Send a STOMP frame.
-@@ -680,4 +708,4 @@
+@@ -680,4 +709,4 @@
                      sleep_exp += 1
  
          if not self.__socket:
