@@ -47,7 +47,6 @@
 -record(subscription, {dest_hdr, channel, multi_ack, description}).
 
 -define(SUPPORTED_VERSIONS, ["1.0", "1.1"]).
--define(DEFAULT_QUEUE_PREFETCH, 1).
 -define(FLUSH_TIMEOUT, 60000).
 
 %%----------------------------------------------------------------------------
@@ -86,10 +85,10 @@ init([Sock, StartHeartbeatFun, Configuration]) ->
     }.
 
 terminate(_Reason, State) ->
-    shutdown_channel_and_connection(State).
+    close_connection(State).
 
 handle_cast(flush_and_die, State) ->
-    {stop, normal, shutdown_channel_and_connection(State)};
+    {stop, normal, close_connection(State)};
 
 handle_cast({"STOMP", Frame}, State) ->
     process_connect(no_implicit, Frame, State);
@@ -233,8 +232,7 @@ validate_frame(_Command, _Frame, State) ->
 %%----------------------------------------------------------------------------
 
 handle_frame("DISCONNECT", _Frame, State) ->
-    %% We'll get to shutdown the channels in terminate
-    {stop, normal, shutdown_channel_and_connection(State)};
+    {stop, normal, close_connection(State)};
 
 handle_frame("SUBSCRIBE", Frame, State) ->
     with_destination("SUBSCRIBE", Frame, State, fun do_subscribe/4);
@@ -431,11 +429,11 @@ do_login(Username0, Password0, VirtualHost0, Heartbeat, AdapterInfo,
     end.
 
 adapter_info(Sock, Version) ->
-    {Addr, Port} = case catch rabbit_net:sockname(Sock) of
+    {Addr, Port} = case rabbit_net:sockname(Sock) of
                        {ok, Res} -> Res;
                        _         -> {unknown, unknown}
                    end,
-    {PeerAddr, PeerPort} = case catch rabbit_net:peername(Sock) of
+    {PeerAddr, PeerPort} = case rabbit_net:peername(Sock) of
                                {ok, Res2} -> Res2;
                                _          -> {unknown, unknown}
                            end,
@@ -481,8 +479,8 @@ do_subscribe(Destination, DestHdr, Frame,
              State = #state{subscriptions = Subs,
                             connection    = Connection,
                             channel       = MainChannel}) ->
-    Prefetch = rabbit_stomp_frame:integer_header(Frame, "prefetch-count",
-                                                 default_prefetch(Destination)),
+    Prefetch =
+        rabbit_stomp_frame:integer_header(Frame, "prefetch-count", undefined),
 
     Channel = case Prefetch of
                   undefined ->
@@ -605,29 +603,11 @@ send_method(Method, Channel, Properties, BodyFragments, State) ->
                 payload = list_to_binary(BodyFragments)}),
     State.
 
-shutdown_channel_and_connection(State = #state{channel = none}) ->
-    State;
-shutdown_channel_and_connection(State = #state{channel       = Channel,
-                                               connection    = Connection,
-                                               subscriptions = Subs}) ->
-    %% push through all attempts at closure to avoid debris
-    dict:fold(
-        fun(_ConsumerTag, #subscription{channel = SubChannel}, Acc) ->
-            case SubChannel of
-                Channel -> Acc;
-                _ ->
-                    catch amqp_channel:close(SubChannel),
-                    Acc
-            end
-        end, 0, Subs),
-    catch amqp_channel:close(Channel),
+%% Closing the connection will close the channel and subchannels
+close_connection(State = #state{connection = Connection}) ->
+    %% ignore noproc or other exceptions to avoid debris
     catch amqp_connection:close(Connection),
     State#state{channel = none, connection = none, subscriptions = none}.
-
-default_prefetch({queue, _}) ->
-    ?DEFAULT_QUEUE_PREFETCH;
-default_prefetch(_) ->
-    undefined.
 
 %%----------------------------------------------------------------------------
 %% Reply-To
