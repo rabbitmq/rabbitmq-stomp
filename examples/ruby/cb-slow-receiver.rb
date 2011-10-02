@@ -13,4 +13,5 @@ while mesg = conn.receive
   sleep 0.2
   puts 'Awake again. Acking.'
   conn.ack mesg.headers['message-id']
+	break if mesg.body == "All Done!"
 end

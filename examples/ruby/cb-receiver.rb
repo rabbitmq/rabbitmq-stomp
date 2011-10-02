@@ -8,4 +8,5 @@ conn = Stomp::Connection.open('guest', 'guest', host, port)
 conn.subscribe('/queue/carl')
 while mesg = conn.receive
   puts mesg.body
+	break if mesg.body == "All Done!"
 end
