@@ -5,6 +5,30 @@ import time
 
 class TestAck(base.BaseTest):
 
+    def test_ack_after_unsubscribe(self):
+        d = "/queue/ack-test-unsubscribe"
+
+        # subscribe and send message
+        subid = 'sub1'
+        self.listener.reset(1) ## expecting 1 message
+        self.conn.subscribe(destination=d, ack='client', id=subid,
+                            headers={'prefetch-count': '10'})
+        self.conn.send("test1", destination=d)
+        self.assertTrue(self.listener.await(4), "message not received")
+        self.assertEquals(1, len(self.listener.messages))
+        msgid = self.listener.messages[0]['headers']['message-id']
+
+        # unsubscribe before acknowledgement
+        self.conn.unsubscribe(id=subid)
+
+        self.listener.reset(1) ## expecting no messages but look for one
+        # now ack message with subscription id
+        self.conn.ack({'message-id': msgid, 'subscription': subid})
+        
+        if self.listener.await(1) :
+            self.listener.print_state("ack after unsubscribe message(s)")
+        self.assertListener("Message(s) for ack after unsubscribe")
+
     def test_ack_client(self):
         d = "/queue/ack-test"
 
