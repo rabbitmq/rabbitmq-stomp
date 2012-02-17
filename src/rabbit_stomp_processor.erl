@@ -26,6 +26,7 @@
 -include("rabbit_stomp.hrl").
 -include("rabbit_stomp_prefixes.hrl").
 -include("rabbit_stomp_headers.hrl").
+-include_lib("public_key/include/public_key.hrl").
 
 -record(state, {socket, session_id, channel,
                 connection, subscriptions, version,
@@ -184,7 +185,8 @@ process_connect(Implicit,
                   socket  = Sock,
                   config  = #stomp_configuration{
                     default_login    = DefaultLogin,
-                    default_passcode = DefaultPasscode}}) ->
+                    default_passcode = DefaultPasscode,
+                    ssl_cert_login   = SSLCertLogin}}) ->
     process_request(
       fun(StateN) ->
               case negotiate_version(Frame) of
@@ -193,10 +195,17 @@ process_connect(Implicit,
                       Frame1 = FT(Frame),
                       {ok, DefaultVHost} =
                           application:get_env(rabbit, default_vhost),
+                      AdapterInfo = adapter_info(Sock, Version),
+                      SSLLoginName = case SSLCertLogin of
+                          true -> get_ssl_cert_login_name(AdapterInfo);
+                          _    -> undefined
+                      end,
                       Res = do_login(
                                 rabbit_stomp_frame:header(Frame1,
                                                           ?HEADER_LOGIN,
-                                                          DefaultLogin),
+                                                          undefined),
+                                SSLLoginName,
+                                DefaultLogin,
                                 rabbit_stomp_frame:header(Frame1,
                                                           ?HEADER_PASSCODE,
                                                           DefaultPasscode),
@@ -207,7 +216,7 @@ process_connect(Implicit,
                                 rabbit_stomp_frame:header(Frame1,
                                                           ?HEADER_HEART_BEAT,
                                                           "0,0"),
-                                adapter_info(Sock, Version),
+                                AdapterInfo,
                                 Version,
                                 StateN#state{frame_transformer = FT}),
                       case {Res, Implicit} of
@@ -427,42 +436,64 @@ without_headers([Hdr | Hdrs], Command, Frame, State, Fun) ->
 without_headers([], Command, Frame, State, Fun) ->
     Fun(Command, Frame, State).
 
-do_login(undefined, _, _, _, _, _, State) ->
+%% The first 3 paramerers of do_login are LoginHeader, SSLLoginName,
+%% and DefaultLogin. LoginHeader takes precedence over SSLLoginName,
+%% which takes precedence over DefaultLogin.
+do_login(undefined, undefined, undefined, _, _, _, _, _, State) ->
     error("Bad CONNECT", "Missing login or passcode header(s)\n", State);
-
-do_login(Username0, Password0, VirtualHost0, Heartbeat, AdapterInfo,
+do_login(undefined, undefined, DefaultLogin, Password, VirtualHost,
+         Heartbeat, AdapterInfo, Version, State) ->
+    do_login(DefaultLogin, undefined, undefined, Password, VirtualHost,
+         Heartbeat, AdapterInfo, Version, State);
+do_login(undefined, SSLLoginName, _, _, VirtualHost0,
+         Heartbeat, AdapterInfo, Version, State) ->
+    Username = SSLLoginName,
+    VirtualHost = list_to_binary(VirtualHost0),
+    case rabbit_access_control:check_user_login(Username, []) of
+        {ok, _User} ->
+            do_login_authenticated(Username, VirtualHost, Heartbeat,
+                AdapterInfo, Version, State);
+        {refused, _Msg, _Args} ->
+            error("Bad CONNECT", "Authentication failure\n", State)
+    end;
+do_login(Username0, _, _, Password0, VirtualHost0, Heartbeat, AdapterInfo,
          Version, State) ->
     Username = list_to_binary(Username0),
     Password = list_to_binary(Password0),
     VirtualHost = list_to_binary(VirtualHost0),
     case rabbit_access_control:check_user_pass_login(Username, Password) of
         {ok, _User} ->
-            case amqp_connection:start(
-                   #amqp_params_direct{username     = Username,
-                                       virtual_host = VirtualHost,
-                                       adapter_info = AdapterInfo}) of
-                {ok, Connection} ->
+            do_login_authenticated(Username, VirtualHost, Heartbeat,
+                AdapterInfo, Version, State);
+        {refused, _Msg, _Args} ->
+            error("Bad CONNECT", "Authentication failure\n", State)
+    end.
+
+do_login_authenticated(Username, VirtualHost, Heartbeat,
+        AdapterInfo, Version, State) ->
+    case amqp_connection:start(
+            #amqp_params_direct{username     = Username,
+                                virtual_host = VirtualHost,
+                                adapter_info = AdapterInfo}) of
+        {ok, Connection} ->
                     link(Connection),
-                    {ok, Channel} = amqp_connection:open_channel(Connection),
+            {ok, Channel} = amqp_connection:open_channel(Connection),
                     SessionId =
                         rabbit_guid:string(rabbit_guid:gen_secure(), "session"),
-                    {{SendTimeout, ReceiveTimeout}, State1} =
-                        ensure_heartbeats(Heartbeat, State),
-                    ok("CONNECTED",
-                       [{?HEADER_SESSION, SessionId},
-                        {?HEADER_HEART_BEAT,
-                         io_lib:format("~B,~B", [SendTimeout, ReceiveTimeout])},
-                        {?HEADER_VERSION, Version}],
-                       "",
-                       State1#state{session_id = SessionId,
-                                    channel    = Channel,
-                                    connection = Connection});
-                {error, auth_failure} ->
-                    error("Bad CONNECT", "Authentication failure\n", State);
-                {error, access_refused} ->
-                    error("Bad CONNECT", "Authentication failure\n", State)
-            end;
-        {refused, _Msg, _Args} ->
+            {{SendTimeout, ReceiveTimeout}, State1} =
+                ensure_heartbeats(Heartbeat, State),
+            ok("CONNECTED",
+                [{?HEADER_SESSION, SessionId},
+                {?HEADER_HEART_BEAT,
+                    io_lib:format("~B,~B", [SendTimeout, ReceiveTimeout])},
+                {?HEADER_VERSION, Version}],
+                "",
+                State1#state{session_id = SessionId,
+                            channel    = Channel,
+                            connection = Connection});
+        {error, auth_failure} ->
+            error("Bad CONNECT", "Authentication failure\n", State);
+        {error, access_refused} ->
             error("Bad CONNECT", "Authentication failure\n", State)
     end.
 
@@ -503,14 +534,26 @@ ssl_info(Sock) ->
 ssl_cert_info(Sock) ->
     case rabbit_net:peercert(Sock) of
         {ok, Cert} ->
+            CN = case rabbit_ssl:peer_cert_subject_item(
+                        Cert, ?'id-at-commonName') of
+                    not_found -> not_found;
+                    CN0       -> list_to_binary(CN0)
+                 end,
             [{peer_cert_issuer,   list_to_binary(
                                     rabbit_ssl:peer_cert_issuer(Cert))},
              {peer_cert_subject,  list_to_binary(
                                     rabbit_ssl:peer_cert_subject(Cert))},
+             {peer_cert_cn,       CN},
              {peer_cert_validity, list_to_binary(
                                     rabbit_ssl:peer_cert_validity(Cert))}];
         _ ->
             []
+    end.
+
+get_ssl_cert_login_name(#adapter_info{additional_info = SSLInfo}) ->
+    case lists:keysearch(peer_cert_cn, 1, SSLInfo) of
+        {value, {_, Str}} -> Str;
+        _                 -> undefined
     end.
 
 do_subscribe(Destination, DestHdr, Frame,

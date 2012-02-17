@@ -25,7 +25,8 @@
         #stomp_configuration{
           default_login    = undefined,
           default_passcode = undefined,
-          implicit_connect = false}).
+          implicit_connect = false,
+          ssl_cert_login   = false}).
 
 start(normal, []) ->
     Config = parse_configuration(),
@@ -68,6 +69,12 @@ parse_default_user([{passcode, Passcode} | Rest], Configuration) ->
 parse_default_user([implicit_connect | Rest], Configuration) ->
     parse_default_user(Rest, Configuration#stomp_configuration{
                                implicit_connect = true});
+parse_default_user([ssl_cert_login | Rest], Configuration) ->
+    case allow_ssl_cert_login() of
+        true -> parse_default_user(Rest, Configuration#stomp_configuration{
+                                   ssl_cert_login = true});
+        _    -> parse_default_user(Rest, Configuration)
+    end;
 parse_default_user([Unknown | Rest], Configuration) ->
     rabbit_log:warning("rabbit_stomp: ignoring invalid default_user "
                        "configuration option: ~p~n", [Unknown]),
@@ -75,7 +82,8 @@ parse_default_user([Unknown | Rest], Configuration) ->
 
 report_configuration(#stomp_configuration{
                         default_login    = Login,
-                        implicit_connect = ImplicitConnect}) ->
+                        implicit_connect = ImplicitConnect,
+                        ssl_cert_login   = SSLCertLogin}) ->
     case Login of
         undefined -> ok;
         _         -> rabbit_log:info("rabbit_stomp: default user '~s' "
@@ -87,6 +95,28 @@ report_configuration(#stomp_configuration{
         false -> ok
     end,
 
+    case SSLCertLogin of
+        true  -> error_logger:info_msg("STOMP ssl_cert_login enabled~n");
+        false -> ok
+    end,
+    
     ok.
 
-
+allow_ssl_cert_login() ->
+    case application:get_env(rabbit, ssl_options) of
+        undefined ->
+            rabbit_log:warning("STOMP ssl_cert_login disabled, "
+                               "ssl_options not set~n"),
+            false;
+        {ok, Opts} ->
+            case {proplists:get_value(fail_if_no_peer_cert, Opts),
+                proplists:get_value(verify, Opts)} of
+                {true, verify_peer} ->
+                    true;
+                {F, V} ->
+                    rabbit_log:warning("STOMP ssl_cert_login disabled, "
+                                    "fail_if_no_peer_cert=~p; "
+                                    "verify=~p~n", [F, V]),
+                    false
+            end
+    end.
