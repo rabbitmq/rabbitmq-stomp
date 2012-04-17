@@ -128,7 +128,7 @@ next_state(S, _) ->
 run_socket(#reader_state{state = blocked}, _ByteCount) ->
     ok;
 run_socket(#reader_state{socket = Sock}, ByteCount) ->
-    rabbit_net:async_recv(Sock, ByteCount, infinity),
+    rabbit_net:async_recv(Sock, ByteCount),
     ok.
 
 %%----------------------------------------------------------------------------
