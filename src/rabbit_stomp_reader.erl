@@ -212,12 +212,10 @@ ssl_cert_info(Sock) ->
 ssl_login_name(_Sock, #stomp_configuration{ssl_cert_login = false}) ->
     none;
 ssl_login_name(Sock, #stomp_configuration{ssl_cert_login = true}) ->
-    case rabbit_net:peercert(Sock) of
-        {ok, C}              -> case rabbit_ssl:peer_cert_auth_name(C) of
-                                    unsafe    -> none;
-                                    not_found -> none;
-                                    Name      -> Name
-                                end;
-        {error, no_peercert} -> none;
-        nossl                -> none
+    case rabbit_ssl:peer_cert_auth_name(Sock) of
+        unsafe      -> none;
+        not_found   -> none;
+        no_peercert -> none;
+        nossl       -> none;
+        Name        -> Name
     end.
