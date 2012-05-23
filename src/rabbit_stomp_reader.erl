@@ -25,7 +25,8 @@
 -include_lib("amqp_client/include/amqp_client.hrl").
 
 -record(reader_state, {socket, parse_state, processor, state,
-                       conserve_resources, recv_outstanding}).
+                       conserve_resources, recv_outstanding, mss_recv,
+                       zero_recv_pending}).
 
 %%----------------------------------------------------------------------------
 
@@ -53,7 +54,9 @@ init(SupPid, Configuration) ->
                                     processor          = ProcessorPid,
                                     state              = running,
                                     conserve_resources = false,
-                                    recv_outstanding   = false})), 0),
+                                    recv_outstanding   = false,
+                                    mss_recv           = 0,
+                                    zero_recv_pending  = false})), 0),
                 log(info, "closing STOMP connection ~p (~s)~n",
                     [self(), ConnStr])
             catch
@@ -70,7 +73,7 @@ mainloop(State0 = #reader_state{socket = Sock}, ByteCount) ->
     State = run_socket(State0, ByteCount),
     receive
         {inet_async, Sock, _Ref, {ok, Data}} ->
-            process_received_bytes(Data, State#reader_state{recv_outstanding = false});
+            process_received_bytes(Data, accept_recv(State, Data));
         {inet_async, _Sock, _Ref, {error, closed}} ->
             ok;
         {inet_async, _Sock, _Ref, {error, Reason}} ->
@@ -125,13 +128,27 @@ next_state(blocking, #stomp_frame{command = "SEND"}) ->
 next_state(S, _) ->
     S.
 
+accept_recv(State = #reader_state{zero_recv_pending = true,
+                                  mss_recv = MssRecv},
+            Data) ->
+    State#reader_state{recv_outstanding  = false,
+                       zero_recv_pending = false,
+                       mss_recv          = max(byte_size(Data), MssRecv)};
+accept_recv(State, _Data) ->
+    State#reader_state{recv_outstanding = false}.
+
 run_socket(State = #reader_state{state = blocked}, _ByteCount) ->
     State;
 run_socket(State = #reader_state{recv_outstanding = true}, _ByteCount) ->
     State;
-run_socket(State = #reader_state{socket = Sock}, ByteCount) ->
+run_socket(State = #reader_state{socket = Sock, mss_recv = MssRecv},
+           ByteCount) when ByteCount > MssRecv ->
     rabbit_net:async_recv(Sock, ByteCount, infinity),
-    State#reader_state{recv_outstanding = true}.
+    State#reader_state{recv_outstanding = true};
+run_socket(State = #reader_state{socket = Sock}, _ByteCount) ->
+    rabbit_net:async_recv(Sock, 0, infinity),
+    State#reader_state{recv_outstanding = true,
+                       zero_recv_pending = true}.
 
 %%----------------------------------------------------------------------------
 
