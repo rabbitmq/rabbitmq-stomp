@@ -282,7 +282,7 @@ handle_frame("SEND", Frame, State) ->
         end);
 
 handle_frame("ACK", Frame, State) ->
-    ack_action("ACK", Frame, State, fun create_ack_method/2);
+    ack_action("ACK", Frame, State, fun create_ack_method/3);
 
 handle_frame("NACK", Frame, State) ->
     ack_action("NACK", Frame, State, fun create_nack_method/3);
@@ -600,6 +600,9 @@ do_send(Destination, _DestHdr,
 create_ack_method(DeliveryTag, #subscription{multi_ack = IsMulti}) ->
     #'basic.ack'{delivery_tag = DeliveryTag,
                  multiple     = IsMulti}.
+
+create_ack_method(DeliveryTag, Subscription, _) ->
+    create_ack_method(DeliveryTag, Subscription).
 
 create_nack_method(DeliveryTag, #subscription{multi_ack = IsMulti}, ReQueue) ->
     #'basic.nack'{delivery_tag = DeliveryTag,
