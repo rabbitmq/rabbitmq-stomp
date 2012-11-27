@@ -1,7 +1,10 @@
 require 'rubygems'
 require 'stomp' # this is a gem
 
-conn = Stomp::Connection.open('guest', 'guest', 'localhost')
+host = ENV["STOMP_HOST"] ? ENV["STOMP_HOST"] : "localhost"
+port = ENV["STOMP_PORT"] ? ENV["STOMP_PORT"].to_i : 61613
+
+conn = Stomp::Connection.open('guest', 'guest', host, port)
 puts "Subscribing to /topic/x"
 conn.subscribe('/topic/x')
 puts 'Receiving...'

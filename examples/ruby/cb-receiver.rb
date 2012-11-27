@@ -1,8 +1,12 @@
 require 'rubygems'
 require 'stomp'
 
-conn = Stomp::Connection.open('guest', 'guest', 'localhost')
+host = ENV["STOMP_HOST"] ? ENV["STOMP_HOST"] : "localhost"
+port = ENV["STOMP_PORT"] ? ENV["STOMP_PORT"].to_i : 61613
+
+conn = Stomp::Connection.open('guest', 'guest', host, port)
 conn.subscribe('/queue/carl')
 while mesg = conn.receive
   puts mesg.body
+	break if mesg.body == "All Done!"
 end
