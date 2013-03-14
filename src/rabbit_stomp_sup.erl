@@ -37,7 +37,7 @@ init([{Listeners, SslListeners}, Configuration]) ->
           [{rabbit_stomp_client_sup_sup,
             {rabbit_client_sup, start_link,
              [{local, rabbit_stomp_client_sup_sup},
-              {rabbit_stomp_client_sup, start_link,[]}]},
+              {{rabbit_stomp_client_sup, start_link,[]}, []}]},
             transient, infinity, supervisor, [rabbit_client_sup]} |
            listener_specs(fun tcp_listener_spec/1,
                           [SocketOpts, Configuration], Listeners) ++
