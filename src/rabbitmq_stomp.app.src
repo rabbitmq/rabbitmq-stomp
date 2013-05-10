@@ -8,7 +8,6 @@
           [{login,    "guest"},
            {passcode, "guest"},
            {host,     <<"/">>}]},
-         {default_vhost, <<"/">>},
          {ssl_cert_login, false},
          {implicit_connect, false},
          {tcp_listeners, [61613]},
