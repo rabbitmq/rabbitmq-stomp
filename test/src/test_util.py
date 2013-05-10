@@ -14,13 +14,13 @@ def ensure_ssl_auth_user():
     rabbitmqctl(['set_permissions', user, '.*', '.*', '.*'])
 
 def enable_implicit_connect():
-    switch_config(implicit_connect='true', default_user='[{login, "guest"}, {passcode, "guest"}]')
+    switch_config(implicit_connect='true', default_user='[{login, "guest"}, {passcode, "guest"}, {host, <<"/">>}]')
 
 def disable_implicit_connect():
     switch_config(implicit_connect='false', default_user='[]')
 
 def enable_default_user():
-    switch_config(default_user='[{login, "guest"}, {passcode, "guest"}]')
+    switch_config(default_user='[{login, "guest"}, {passcode, "guest"}, {host, <<"/">>}]')
 
 def disable_default_user():
     switch_config(default_user='[]')

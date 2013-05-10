@@ -21,13 +21,6 @@
 -behaviour(application).
 -export([start/2, stop/1]).
 
--define(DEFAULT_CONFIGURATION,
-        #stomp_configuration{
-          default_login    = undefined,
-          default_passcode = undefined,
-          implicit_connect = false,
-          ssl_cert_login   = false}).
-
 start(normal, []) ->
     Config = parse_configuration(),
     Listeners = parse_listener_configuration(),
@@ -43,7 +36,7 @@ parse_listener_configuration() ->
 
 parse_configuration() ->
     {ok, UserConfig} = application:get_env(default_user),
-    Conf0 = parse_default_user(UserConfig, ?DEFAULT_CONFIGURATION),
+    Conf0 = parse_default_user(UserConfig, default_configuration()),
     {ok, SSLLogin} = application:get_env(ssl_cert_login),
     {ok, ImplicitConnect} = application:get_env(implicit_connect),
     Conf = Conf0#stomp_configuration{ssl_cert_login   = SSLLogin,
@@ -59,10 +52,21 @@ parse_default_user([{login, Login} | Rest], Configuration) ->
 parse_default_user([{passcode, Passcode} | Rest], Configuration) ->
     parse_default_user(Rest, Configuration#stomp_configuration{
                                default_passcode = Passcode});
+parse_default_user([{host, Host} | Rest], Configuration) ->
+    parse_default_user(Rest, Configuration#stomp_configuration{
+                               default_host = Host});
 parse_default_user([Unknown | Rest], Configuration) ->
     rabbit_log:warning("rabbit_stomp: ignoring invalid default_user "
                        "configuration option: ~p~n", [Unknown]),
     parse_default_user(Rest, Configuration).
+
+default_configuration() ->
+        #stomp_configuration{
+          default_login    = undefined,
+          default_passcode = undefined,
+          default_host     = application:get_env(rabbit, default_vhost),
+          implicit_connect = false,
+          ssl_cert_login   = false}.
 
 report_configuration(#stomp_configuration{
                         default_login    = Login,
