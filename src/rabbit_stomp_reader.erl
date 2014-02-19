@@ -163,7 +163,7 @@ processor_args(SupPid, Configuration, Sock) ->
                                        SendFin, ReceiveTimeout, ReceiveFun)
         end,
     [SendFun, adapter_info(Sock), StartHeartbeatFun,
-     ssl_login_name(Sock, Configuration)].
+     ssl_login_name(Sock, Configuration), Sock].
 
 adapter_info(Sock) ->
     amqp_connection:socket_adapter_info(Sock, {'STOMP', 0}).
