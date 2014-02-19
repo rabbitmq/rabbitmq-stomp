@@ -16,8 +16,8 @@
 
 -module(rabbit_stomp_reader).
 
--export([start_link/3]).
--export([init/3]).
+-export([start_link/2]).
+-export([init/1]).
 -export([conserve_resources/3]).
 
 -include("rabbit_stomp.hrl").
@@ -29,24 +29,24 @@
 
 %%----------------------------------------------------------------------------
 
-start_link(SupPid, ProcessorPid, Configuration) ->
+start_link(SupPid, ProcessorPid) ->
         {ok, proc_lib:spawn_link(?MODULE, init,
-                                 [SupPid, ProcessorPid, Configuration])}.
+                                 [{SupPid, ProcessorPid}])}.
 
 log(Level, Fmt, Args) -> rabbit_log:log(connection, Level, Fmt, Args).
 
-init(SupPid, ProcessorPid, Configuration) ->
-    Reply = go(SupPid, ProcessorPid, Configuration),
+init({SupPid, ProcessorPid}) ->
+    Reply = go(SupPid, ProcessorPid),
     rabbit_stomp_processor:flush_and_die(ProcessorPid),
     Reply.
 
-go(SupPid, ProcessorPid, Configuration) ->
+go(SupPid, ProcessorPid) ->
     receive
         {go, Sock0, SockTransform} ->
             {ok, Sock} = SockTransform(Sock0),
             case rabbit_net:connection_string(Sock, inbound) of
                 {ok, ConnStr} ->
-                    ProcInitArgs = processor_args(SupPid, Configuration, Sock),
+                    ProcInitArgs = processor_args(SupPid, Sock),
                     rabbit_stomp_processor:init_arg(ProcessorPid, ProcInitArgs),
                     log(info, "accepting STOMP connection ~p (~s)~n",
                         [self(), ConnStr]),
@@ -144,7 +144,7 @@ run_socket(State = #reader_state{socket = Sock}) ->
 
 %%----------------------------------------------------------------------------
 
-processor_args(SupPid, Configuration, Sock) ->
+processor_args(SupPid, Sock) ->
     SendFun = fun (sync, IoData) ->
                       %% no messages emitted
                       catch rabbit_net:send(Sock, IoData);
@@ -162,21 +162,4 @@ processor_args(SupPid, Configuration, Sock) ->
                 rabbit_heartbeat:start(SupPid, Sock, SendTimeout,
                                        SendFin, ReceiveTimeout, ReceiveFun)
         end,
-    [SendFun, adapter_info(Sock), StartHeartbeatFun,
-     ssl_login_name(Sock, Configuration), Sock].
-
-adapter_info(Sock) ->
-    amqp_connection:socket_adapter_info(Sock, {'STOMP', 0}).
-
-ssl_login_name(_Sock, #stomp_configuration{ssl_cert_login = false}) ->
-    none;
-ssl_login_name(Sock, #stomp_configuration{ssl_cert_login = true}) ->
-    case rabbit_net:peercert(Sock) of
-        {ok, C}              -> case rabbit_ssl:peer_cert_auth_name(C) of
-                                    unsafe    -> none;
-                                    not_found -> none;
-                                    Name      -> Name
-                                end;
-        {error, no_peercert} -> none;
-        nossl                -> none
-    end.
+    [SendFun, StartHeartbeatFun, Sock].

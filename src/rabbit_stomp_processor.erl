@@ -30,7 +30,7 @@
 -record(state, {session_id, channel, connection, subscriptions,
                 version, start_heartbeat_fun, pending_receipts,
                 config, route_state, reply_queues, frame_transformer,
-                adapter_info, send_fun, ssl_login_name, socket}).
+                send_fun, socket}).
 
 -record(subscription, {dest_hdr, channel, ack_mode, multi_ack, description}).
 
@@ -79,12 +79,10 @@ init(Configuration) ->
 terminate(_Reason, State) ->
     close_connection(State).
 
-handle_cast({init, [SendFun, AdapterInfo, StartHeartbeatFun, SSLLoginName, Sock]},
+handle_cast({init, [SendFun, StartHeartbeatFun, Sock]},
             State) ->
     {noreply, State #state { send_fun            = SendFun,
-                             adapter_info        = AdapterInfo,
                              start_heartbeat_fun = StartHeartbeatFun,
-                             ssl_login_name      = SSLLoginName,
                              socket              = Sock }};
 
 handle_cast(flush_and_die, State) ->
@@ -192,27 +190,23 @@ process_request(ProcessFun, SuccessFun, State) ->
             {stop, R, NewState}
     end.
 
-process_connect(Implicit, Frame,
-                State = #state{channel        = none,
-                               config         = Config,
-                               ssl_login_name = SSLLoginName,
-                               adapter_info   = AdapterInfo}) ->
+process_connect(Implicit, Frame, State = #state{channel = none,
+                                                config  = Config,
+                                                socket  = Sock}) ->
     process_request(
       fun(StateN) ->
               case negotiate_version(Frame) of
                   {ok, Version} ->
                       FT = frame_transformer(Version),
                       Frame1 = FT(Frame),
-                      {Username, Passwd} = creds(Frame1, SSLLoginName, Config),
+                      {Username, Passwd} = creds(Frame1, Sock, Config),
                       {ok, DefaultVHost} = application:get_env(
                                              rabbitmq_stomp, default_vhost),
-                      {ProtoName, _} = AdapterInfo#amqp_adapter_info.protocol,
                       Res = do_login(
                               Username, Passwd,
                               login_header(Frame1, ?HEADER_HOST, DefaultVHost),
                               login_header(Frame1, ?HEADER_HEART_BEAT, "0,0"),
-                              AdapterInfo#amqp_adapter_info{
-                                protocol = {ProtoName, Version}}, Version,
+                              adapter_info(Version, Sock), Version,
                               StateN#state{frame_transformer = FT}),
                       case {Res, Implicit} of
                           {{ok, _, StateN1}, implicit} -> ok(StateN1);
@@ -227,12 +221,17 @@ process_connect(Implicit, Frame,
       end,
       State).
 
-creds(Frame, SSLLoginName,
+adapter_info(Version, Sock) ->
+    amqp_connection:socket_adapter_info(Sock, {'STOMP', Version}).
+
+creds(Frame, Sock,
       #stomp_configuration{default_login    = DefLogin,
-                           default_passcode = DefPasscode}) ->
+                           default_passcode = DefPasscode,
+                           ssl_cert_login   = SSLLogin}) ->
     PasswordCreds = {login_header(Frame, ?HEADER_LOGIN,    DefLogin),
                      login_header(Frame, ?HEADER_PASSCODE, DefPasscode)},
-    case {rabbit_stomp_frame:header(Frame, ?HEADER_LOGIN), SSLLoginName} of
+    case {rabbit_stomp_frame:header(Frame, ?HEADER_LOGIN),
+          ssl_login_name(Sock, SSLLogin)} of
         {not_found, none}    -> PasswordCreds;
         {not_found, SSLName} -> {SSLName, none};
         _                    -> PasswordCreds
@@ -244,6 +243,19 @@ login_header(Frame, Key, Default) ->
     case rabbit_stomp_frame:header(Frame, Key, Default) of
         undefined -> undefined;
         Hdr       -> list_to_binary(Hdr)
+    end.
+
+ssl_login_name(_Sock, false) ->
+    none;
+ssl_login_name(Sock, true) ->
+    case rabbit_net:peercert(Sock) of
+        {ok, C}              -> case rabbit_ssl:peer_cert_auth_name(C) of
+                                    unsafe    -> none;
+                                    not_found -> none;
+                                    Name      -> Name
+                                end;
+        {error, no_peercert} -> none;
+        nossl                -> none
     end.
 
 %%----------------------------------------------------------------------------

@@ -38,7 +38,7 @@ start_link(Configuration) ->
                         SupPid,
                         {rabbit_stomp_reader,
                          {rabbit_stomp_reader,
-                          start_link, [SupPid, ProcessorPid, Configuration]},
+                          start_link, [SupPid, ProcessorPid]},
                          transient, ?MAX_WAIT, worker,
                          [rabbit_stomp_reader]}),
 
