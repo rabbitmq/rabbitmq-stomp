@@ -619,17 +619,12 @@ do_send(Destination, _DestHdr,
         Frame = #stomp_frame{body_iolist = BodyFragments},
         State = #state{channel = Channel, route_state = RouteState}) ->
     case ensure_endpoint(dest, Destination, Frame, Channel, RouteState) of
-
         {ok, _Q, RouteState1} ->
-
             {Frame1, State1} =
                 ensure_reply_to(Frame, State#state{route_state = RouteState1}),
-
             Props = rabbit_stomp_util:message_properties(Frame1),
-
             {Exchange, RoutingKey} =
                 rabbit_routing_util:parse_routing(Destination),
-
             Method = #'basic.publish'{
               exchange = list_to_binary(Exchange),
               routing_key = list_to_binary(RoutingKey),
@@ -946,49 +941,93 @@ millis_to_seconds(M)               -> M div 1000.
 %% Queue Setup
 %%----------------------------------------------------------------------------
 
+queue_arguments() ->
+    case rabbit_stomp_util:env(subscription_ttl) of
+        undefined ->
+            [];
+        Ms when is_integer(Ms) ->
+            [{<<"x-expires">>, long, Ms}];
+        _ ->
+            []
+    end.
+
+queue_attributes_for(Frame) ->
+    case rabbit_stomp_frame:boolean_header(
+           Frame, ?HEADER_PERSISTENT, false) of
+        true ->
+            [{durable, true}];
+        false ->
+            [{durable, false}]
+    end.
+
+id_from(Frame) ->
+    case rabbit_stomp_frame:header(Frame, ?HEADER_ID) of
+        {ok, ID} ->
+            ID;
+        not_found ->
+            rabbit_guid:gen_secure()
+    end.
+
 ensure_endpoint(_Direction, {queue, []}, _Frame, _Channel, _State) ->
     {error, {invalid_destination, "Destination cannot be blank"}};
 
-ensure_endpoint(source, EndPoint, Frame, Channel, State) ->
-    Params =
-        case rabbit_stomp_frame:boolean_header(
-               Frame, ?HEADER_PERSISTENT, false) of
-            true ->
-                [{subscription_queue_name_gen,
-                  fun () ->
-                          {ok, Id} = rabbit_stomp_frame:header(Frame, ?HEADER_ID),
-                          {_, Name} = rabbit_routing_util:parse_routing(EndPoint),
-                          list_to_binary(
-                            rabbit_stomp_util:subscription_queue_name(Name,
-                                                                      Id))
-                  end},
-                 {durable, true}];
-            false ->
-                [{subscription_queue_name_gen,
-                  fun () ->
-                          Id = rabbit_guid:gen_secure(),
-                          {_, Name} = rabbit_routing_util:parse_routing(EndPoint),
-                          list_to_binary(
-                            rabbit_stomp_util:subscription_queue_name(Name,
-                                                                      Id))
-                  end},
-                 {durable, false}]
-        end,
-    rabbit_routing_util:ensure_endpoint(source, Channel, EndPoint, Params, State);
+ensure_endpoint(_Direction, {amqqueue, []}, _Frame, _Channel, _State) ->
+    {error, {invalid_destination, "Destination cannot be blank"}};
 
-ensure_endpoint(Direction, {queue, Q}, _Frame, Channel, State) ->
-    Params = case rabbit_stomp_util:env(subscription_ttl) of
-                 undefined ->
-                     [];
-                 Ms when is_integer(Ms) ->
-                     [{arguments, [{<<"x-expires">>, long, Ms}]}];
-                 _ ->
-                     []
-             end,
-    rabbit_routing_util:ensure_endpoint(Direction, Channel, {queue, Q}, Params, State);
+ensure_endpoint(_Direction, {topic, []}, _Frame, _Channel, _State) ->
+    {error, {invalid_destination, "Destination cannot be blank"}};
 
-ensure_endpoint(Direction, Endpoint, _Frame, Channel, State) ->
-    rabbit_routing_util:ensure_endpoint(Direction, Channel, Endpoint, State).
+
+%% SUBSCRIBE /queue/{Q}
+ensure_endpoint(source, Endpoint = {queue, Q}, Frame, Channel, State) ->
+    Params  = queue_attributes_for(Frame) ++ [{arguments, queue_arguments()}],
+    rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint,
+                                        Params, State);
+
+%% SUBSCRIBE /amq/queue/{Q}
+ensure_endpoint(source, Endpoint = {amqqueue, _}, _Frame, Channel, State) ->
+    %% the queue is assumed to be declared
+    rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint,
+                                        [], State);
+
+%% SUBSCRIBE /exchange/{E}
+%% SUBSCRIBE /topic/{T}
+ensure_endpoint(source, Endpoint = {Type, _}, Frame, Channel, State)
+  when Type =:= exchange orelse Type =:= topic ->
+    io:format("source Endpoint: ~p, Frame: ~p~n", [Endpoint, Frame]),
+    Fn      = fun () ->
+                      Id        = id_from(Frame),
+                      {_, Name} = rabbit_routing_util:parse_routing(Endpoint),
+                      list_to_binary(
+                        rabbit_stomp_util:subscription_queue_name(Name,
+                                                                  Id))
+              end,
+    Params = [{subscription_queue_name_gen, Fn}]
+        ++ queue_attributes_for(Frame)
+        ++ [{arguments, queue_arguments()}],
+    rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint, Params, State);
+
+%% SEND /queue/{Q}
+ensure_endpoint(dest, {queue, Q}, Frame, Channel, State) ->
+    Params = [{arguments, queue_arguments()}],
+    rabbit_routing_util:ensure_endpoint(dest, Channel, {queue, Q}, Params, State);
+
+%% SEND /amq/queue/{Q}
+ensure_endpoint(dest, Endpoint = {amqqueue, _}, _Frame, Channel, State) ->
+    %% the queue is assumed to be declared
+    rabbit_routing_util:ensure_endpoint(dest, Channel, Endpoint,
+                                        [], State);
+
+%% SEND /exchange/{E}/{RK}
+%% SEND /topic/{T}
+%% SEND /temp-queue/{Q}
+%% SEND /reply-queue/{Q}
+ensure_endpoint(dest, Endpoint = {Type, _}, _Frame, Channel, State)
+  when Type =:= exchange
+       orelse Type =:= topic
+       orelse Type =:= temp_queue
+       orelse Type =:= reply_queue ->
+    rabbit_routing_util:ensure_endpoint(dest, Channel, Endpoint, State).
 
 %%----------------------------------------------------------------------------
 %% Success/error handling
