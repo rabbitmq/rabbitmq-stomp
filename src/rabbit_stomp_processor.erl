@@ -968,31 +968,31 @@ id_from(Frame) ->
             rabbit_guid:gen_secure()
     end.
 
-ensure_endpoint(_Direction, {queue, []}, _Frame, _Channel, _State) ->
+ensure_endpoint(_Direction, {queue, []}, _Frame, _Channel, _RoutingState) ->
     {error, {invalid_destination, "Destination cannot be blank"}};
 
-ensure_endpoint(_Direction, {amqqueue, []}, _Frame, _Channel, _State) ->
+ensure_endpoint(_Direction, {amqqueue, []}, _Frame, _Channel, _RoutingState) ->
     {error, {invalid_destination, "Destination cannot be blank"}};
 
-ensure_endpoint(_Direction, {topic, []}, _Frame, _Channel, _State) ->
+ensure_endpoint(_Direction, {topic, []}, _Frame, _Channel, _RoutingState) ->
     {error, {invalid_destination, "Destination cannot be blank"}};
 
 
 %% SUBSCRIBE /queue/{Q}
-ensure_endpoint(source, Endpoint = {queue, Q}, Frame, Channel, State) ->
+ensure_endpoint(source, Endpoint = {queue, Q}, Frame, Channel, RoutingState) ->
     Params  = queue_attributes_for(Frame) ++ [{arguments, queue_arguments()}],
     rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint,
-                                        Params, State);
+                                        Params, RoutingState);
 
 %% SUBSCRIBE /amq/queue/{Q}
-ensure_endpoint(source, Endpoint = {amqqueue, _}, _Frame, Channel, State) ->
+ensure_endpoint(source, Endpoint = {amqqueue, _}, _Frame, Channel, RoutingState) ->
     %% the queue is assumed to be declared
     rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint,
-                                        [], State);
+                                        [], RoutingState);
 
 %% SUBSCRIBE /exchange/{E}
 %% SUBSCRIBE /topic/{T}
-ensure_endpoint(source, Endpoint = {Type, _}, Frame, Channel, State)
+ensure_endpoint(source, Endpoint = {Type, _}, Frame, Channel, RoutingState)
   when Type =:= exchange orelse Type =:= topic ->
     io:format("source Endpoint: ~p, Frame: ~p~n", [Endpoint, Frame]),
     Fn      = fun () ->
@@ -1005,29 +1005,29 @@ ensure_endpoint(source, Endpoint = {Type, _}, Frame, Channel, State)
     Params = [{subscription_queue_name_gen, Fn}]
         ++ queue_attributes_for(Frame)
         ++ [{arguments, queue_arguments()}],
-    rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint, Params, State);
+    rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint, Params, RoutingState);
 
 %% SEND /queue/{Q}
-ensure_endpoint(dest, {queue, Q}, Frame, Channel, State) ->
+ensure_endpoint(dest, {queue, Q}, Frame, Channel, RoutingState) ->
     Params = [{arguments, queue_arguments()}],
-    rabbit_routing_util:ensure_endpoint(dest, Channel, {queue, Q}, Params, State);
+    rabbit_routing_util:ensure_endpoint(dest, Channel, {queue, Q}, Params, RoutingState);
 
 %% SEND /amq/queue/{Q}
-ensure_endpoint(dest, Endpoint = {amqqueue, _}, _Frame, Channel, State) ->
+ensure_endpoint(dest, Endpoint = {amqqueue, _}, _Frame, Channel, RoutingState) ->
     %% the queue is assumed to be declared
     rabbit_routing_util:ensure_endpoint(dest, Channel, Endpoint,
-                                        [], State);
+                                        [], RoutingState);
 
 %% SEND /exchange/{E}/{RK}
 %% SEND /topic/{T}
 %% SEND /temp-queue/{Q}
 %% SEND /reply-queue/{Q}
-ensure_endpoint(dest, Endpoint = {Type, _}, _Frame, Channel, State)
+ensure_endpoint(dest, Endpoint = {Type, _}, _Frame, Channel, RoutingState)
   when Type =:= exchange
        orelse Type =:= topic
        orelse Type =:= temp_queue
        orelse Type =:= reply_queue ->
-    rabbit_routing_util:ensure_endpoint(dest, Channel, Endpoint, State).
+    rabbit_routing_util:ensure_endpoint(dest, Channel, Endpoint, RoutingState).
 
 %%----------------------------------------------------------------------------
 %% Success/error handling
