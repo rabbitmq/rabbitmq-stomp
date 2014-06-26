@@ -976,6 +976,17 @@ ensure_endpoint(source, EndPoint, Frame, Channel, State) ->
         end,
     rabbit_routing_util:ensure_endpoint(source, Channel, EndPoint, Params, State);
 
+ensure_endpoint(Direction, {queue, Q}, _Frame, Channel, State) ->
+    Params = case rabbit_stomp_util:env(subscription_ttl) of
+                 undefined ->
+                     [];
+                 Ms when is_integer(Ms) ->
+                     [{arguments, [{<<"x-expires">>, long, Ms}]}];
+                 _ ->
+                     []
+             end,
+    rabbit_routing_util:ensure_endpoint(Direction, Channel, {queue, Q}, Params, State);
+
 ensure_endpoint(Direction, Endpoint, _Frame, Channel, State) ->
     rabbit_routing_util:ensure_endpoint(Direction, Channel, Endpoint, State).
 

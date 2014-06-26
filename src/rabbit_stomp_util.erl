@@ -23,6 +23,7 @@
          msg_header_name/1, ack_header_name/1]).
 -export([negotiate_version/2]).
 -export([trim_headers/1]).
+-export([env/1]).
 
 -include_lib("amqp_client/include/amqp_client.hrl").
 -include_lib("amqp_client/include/rabbit_routing_prefixes.hrl").
@@ -318,3 +319,9 @@ escape([],         Acc) -> lists:reverse(Acc).
 revhex(I) -> hexdig(I) ++ hexdig(I bsr 4).
 
 hexdig(I) -> erlang:integer_to_list(I band 15, 16).
+
+env(Key) ->
+    case application:get_env(rabbitmq_stomp, Key) of
+        {ok, Val} -> Val;
+        undefined -> undefined
+    end.
