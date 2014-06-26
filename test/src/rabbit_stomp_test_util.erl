@@ -103,12 +103,6 @@ message_headers_test() ->
     [] = lists:subtract(Headers, Expected).
 
 minimal_message_headers_with_no_custom_test() ->
-    Delivery = #'basic.deliver'{
-      consumer_tag = <<"Q_123">>,
-      delivery_tag = 123,
-      exchange = <<"">>,
-      routing_key = <<"foo">>},
-
     Properties = #'P_basic'{},
 
     Headers = rabbit_stomp_util:message_headers(Properties),
