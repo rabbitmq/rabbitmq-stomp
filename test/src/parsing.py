@@ -51,9 +51,9 @@ class TestParsing(unittest.TestCase):
 
 
     def match(self, pattern, data):
-        ''' helper: try to match 'pattern' regexp with 'data' string.
+        """ helper: try to match 'pattern' regexp with 'data' string.
             Fail test if they don't match.
-        '''
+        """
         matched = re.match(pattern, data)
         if matched:
             return matched.groups()
