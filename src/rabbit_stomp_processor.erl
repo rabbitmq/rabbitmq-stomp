@@ -943,7 +943,7 @@ millis_to_seconds(M)               -> M div 1000.
 %% Queue Setup
 %%----------------------------------------------------------------------------
 
-queue_arguments() ->
+queue_expiration_arguments() ->
     case rabbit_stomp_util:env(subscription_ttl) of
         undefined ->
             [];
@@ -982,7 +982,7 @@ ensure_endpoint(_Direction, {topic, []}, _Frame, _Channel, _RoutingState) ->
 
 %% SEND /queue/{Q}
 ensure_endpoint(dest, {queue, Q}, _Frame, Channel, RoutingState) ->
-    Params = [{arguments, queue_arguments()}],
+    Params = [{arguments, queue_expiration_arguments()}],
     rabbit_routing_util:ensure_endpoint(dest, Channel, {queue, Q}, Params, RoutingState);
 
 %% SEND /amq/queue/{Q}
@@ -1005,7 +1005,7 @@ ensure_endpoint(dest, Endpoint = {Type, _}, _Frame, Channel, RoutingState)
 %% SUBSCRIBE /queue/{Q}
 ensure_endpoint(source, Endpoint = {queue, _}, Frame, Channel, RoutingState,
                _State) ->
-    Params  = queue_attributes_for(Frame) ++ [{arguments, queue_arguments()}],
+    Params  = queue_attributes_for(Frame) ++ [{arguments, queue_expiration_arguments()}],
     rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint,
                                         Params, RoutingState);
 
@@ -1031,7 +1031,7 @@ ensure_endpoint(source, Endpoint = {Type, _}, Frame, Channel, RoutingState,
               end,
     Params = [{subscription_queue_name_gen, Fn}]
         ++ queue_attributes_for(Frame)
-        ++ [{arguments, queue_arguments()}],
+        ++ [{arguments, queue_expiration_arguments()}],
     rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint, Params, RoutingState).
 
 %%----------------------------------------------------------------------------
