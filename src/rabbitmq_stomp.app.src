@@ -10,6 +10,7 @@
          {default_vhost, <<"/">>},
          {ssl_cert_login, false},
          {implicit_connect, false},
+         {subscription_ttl,1800000},
          {tcp_listeners, [61613]},
          {ssl_listeners, []},
          {tcp_listen_options, [binary,
