@@ -23,16 +23,22 @@
 -define(HEADER_CONTENT_TYPE, "content-type").
 -define(HEADER_CORRELATION_ID, "correlation-id").
 -define(HEADER_DESTINATION, "destination").
+%% per-message TTL (SEND frames)
+%% ActiveMQ Apollo supports per-message TTL on SEND frames
+%% but semantically equivalent header is `ttl`
 -define(HEADER_EXPIRATION, "expiration").
 -define(HEADER_HEART_BEAT, "heart-beat").
 -define(HEADER_HOST, "host").
 -define(HEADER_ID, "id").
 -define(HEADER_LOGIN, "login").
 -define(HEADER_MESSAGE_ID, "message-id").
+-define(HEADER_MESSAGE_TTL, "message_ttl").
 -define(HEADER_PASSCODE, "passcode").
 -define(HEADER_PERSISTENT, "persistent").
 -define(HEADER_PREFETCH_COUNT, "prefetch-count").
 -define(HEADER_PRIORITY, "priority").
+%% queue TTL (SUBSCRIBE frames)
+-define(HEADER_QUEUE_TTL, "queue_ttl").
 -define(HEADER_RECEIPT, "receipt").
 -define(HEADER_REPLY_TO, "reply-to").
 -define(HEADER_SERVER, "server").

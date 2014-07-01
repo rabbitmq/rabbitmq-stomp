@@ -424,11 +424,13 @@ tidy_canceled_subscription(ConsumerTag, #subscription{dest_hdr = DestHdr},
     maybe_delete_durable_sub(Dest, Frame, State#state{subscriptions = Subs1}).
 
 maybe_delete_durable_sub({topic, Name}, Frame,
-                         State = #state{channel = Channel}) ->
+                         State = #state{channel = Channel,
+                                        session_id = SessionId}) ->
     case rabbit_stomp_frame:boolean_header(Frame,
                                            ?HEADER_PERSISTENT, false) of
         true ->
-            {ok, Id} = rabbit_stomp_frame:header(Frame, ?HEADER_ID),
+            IdHdr = id_from(Frame),
+            Id    = SessionId ++ ":" ++ IdHdr,
             QName = rabbit_stomp_util:subscription_queue_name(Name, Id),
             amqp_channel:call(Channel,
                               #'queue.delete'{queue  = list_to_binary(QName),
@@ -561,7 +563,8 @@ do_subscribe(Destination, DestHdr, Frame,
         rabbit_stomp_frame:integer_header(Frame, ?HEADER_PREFETCH_COUNT,
                                           undefined),
     {AckMode, IsMulti} = rabbit_stomp_util:ack_mode(Frame),
-    case ensure_endpoint(source, Destination, Frame, Channel, RouteState) of
+    case ensure_endpoint(source, Destination, Frame, Channel, RouteState,
+                         State) of
         {ok, Queue, RouteState1} ->
             {ok, ConsumerTag, Description} =
                 rabbit_stomp_util:consumer_tag(Frame),
@@ -946,38 +949,107 @@ millis_to_seconds(M)               -> M div 1000.
 %% Queue Setup
 %%----------------------------------------------------------------------------
 
-ensure_endpoint(_Direction, {queue, []}, _Frame, _Channel, _State) ->
+id_from(Frame) ->
+    case rabbit_stomp_frame:header(Frame, ?HEADER_ID) of
+        {ok, ID} ->
+            ID;
+        not_found ->
+            rabbit_guid:gen_secure()
+    end.
+
+maybe_add_per_queue_message_ttl_argument(Header, Frame, Proplist) ->
+    case rabbit_stomp_frame:integer_header(Frame, Header) of
+      {ok, Val} ->
+            [{<<"x-message-ttl">>, long, Val} | Proplist];
+      not_found ->
+            Proplist
+    end.
+
+maybe_add_queue_ttl_argument(Header, Frame, Proplist) ->
+    case rabbit_stomp_frame:integer_header(Frame, Header) of
+      {ok, Val} ->
+            [{<<"x-expires">>, long, Val} | Proplist];
+      not_found ->
+            Proplist
+    end.
+
+queue_attributes_for(Frame) ->
+    Val = rabbit_stomp_frame:boolean_header(
+           Frame, ?HEADER_PERSISTENT, false),
+    [{durable, Val}].
+
+queue_arguments_for(Frame) ->
+    lists:foldl(fun ({Header, F}, Acc) -> F(Header, Frame, Acc) end,
+                [], [{?HEADER_MESSAGE_TTL,
+                      fun maybe_add_per_queue_message_ttl_argument/3},
+                     {?HEADER_QUEUE_TTL,
+                      fun maybe_add_queue_ttl_argument/3}]).
+
+ensure_endpoint(_Direction, {queue, []}, _Frame, _Channel, _RoutingState) ->
     {error, {invalid_destination, "Destination cannot be blank"}};
 
-ensure_endpoint(source, EndPoint, Frame, Channel, State) ->
-    Params =
-        case rabbit_stomp_frame:boolean_header(
-               Frame, ?HEADER_PERSISTENT, false) of
-            true ->
-                [{subscription_queue_name_gen,
-                  fun () ->
-                          {ok, Id} = rabbit_stomp_frame:header(Frame, ?HEADER_ID),
-                          {_, Name} = rabbit_routing_util:parse_routing(EndPoint),
-                          list_to_binary(
-                            rabbit_stomp_util:subscription_queue_name(Name,
-                                                                      Id))
-                  end},
-                 {durable, true}];
-            false ->
-                [{subscription_queue_name_gen,
-                  fun () ->
-                          Id = rabbit_guid:gen_secure(),
-                          {_, Name} = rabbit_routing_util:parse_routing(EndPoint),
-                          list_to_binary(
-                            rabbit_stomp_util:subscription_queue_name(Name,
-                                                                      Id))
-                  end},
-                 {durable, false}]
-        end,
-    rabbit_routing_util:ensure_endpoint(source, Channel, EndPoint, Params, State);
+ensure_endpoint(_Direction, {amqqueue, []}, _Frame, _Channel, _RoutingState) ->
+    {error, {invalid_destination, "Destination cannot be blank"}};
 
-ensure_endpoint(Direction, Endpoint, _Frame, Channel, State) ->
-    rabbit_routing_util:ensure_endpoint(Direction, Channel, Endpoint, State).
+ensure_endpoint(_Direction, {topic, []}, _Frame, _Channel, _RoutingState) ->
+    {error, {invalid_destination, "Destination cannot be blank"}};
+
+
+%% SEND /queue/{Q}
+ensure_endpoint(dest, {queue, Q}, Frame, Channel, RoutingState) ->
+    Params = [{arguments, queue_arguments_for(Frame)}],
+    rabbit_routing_util:ensure_endpoint(dest, Channel, {queue, Q},
+                                        Params, RoutingState);
+
+%% SEND /amq/queue/{Q}
+ensure_endpoint(dest, Endpoint = {amqqueue, _}, _Frame, Channel, RoutingState) ->
+    %% the queue is assumed to be declared
+    rabbit_routing_util:ensure_endpoint(dest, Channel, Endpoint,
+                                        [], RoutingState);
+
+%% SEND /exchange/{E}/{RK}
+%% SEND /topic/{T}
+%% SEND /temp-queue/{Q}
+%% SEND /reply-queue/{Q}
+ensure_endpoint(dest, Endpoint = {Type, _}, _Frame, Channel, RoutingState)
+  when Type =:= exchange
+       orelse Type =:= topic
+       orelse Type =:= temp_queue
+       orelse Type =:= reply_queue ->
+    rabbit_routing_util:ensure_endpoint(dest, Channel, Endpoint, RoutingState).
+
+%% SUBSCRIBE /queue/{Q}
+ensure_endpoint(source, Endpoint = {queue, _}, Frame, Channel, RoutingState,
+               _State) ->
+    Params  = queue_attributes_for(Frame)
+        ++ [{arguments, queue_arguments_for(Frame)}],
+    rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint,
+                                        Params, RoutingState);
+
+%% SUBSCRIBE /amq/queue/{Q}
+ensure_endpoint(source, Endpoint = {amqqueue, _}, _Frame, Channel, RoutingState,
+               _State) ->
+    %% the queue is assumed to be declared
+    rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint,
+                                        [], RoutingState);
+
+%% SUBSCRIBE /exchange/{E}
+%% SUBSCRIBE /topic/{T}
+ensure_endpoint(source, Endpoint = {Type, _}, Frame, Channel, RoutingState,
+               #state{session_id = SessionId})
+  when Type =:= exchange orelse Type =:= topic ->
+    Fn      = fun () ->
+                      IdHdr     = id_from(Frame),
+                      {_, Name} = rabbit_routing_util:parse_routing(Endpoint),
+                      Id        = SessionId ++ ":" ++ IdHdr,
+                      list_to_binary(
+                        rabbit_stomp_util:subscription_queue_name(Name,
+                                                                  Id))
+              end,
+    Params = [{subscription_queue_name_gen, Fn}]
+        ++ queue_attributes_for(Frame)
+        ++ [{arguments, queue_arguments_for(Frame)}],
+    rabbit_routing_util:ensure_endpoint(source, Channel, Endpoint, Params, RoutingState).
 
 %%----------------------------------------------------------------------------
 %% Success/error handling

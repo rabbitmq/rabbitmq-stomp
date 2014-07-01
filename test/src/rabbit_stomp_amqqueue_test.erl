@@ -80,6 +80,24 @@ test_subscribe(Channel, Client, _Version) ->
     {ok, _Client2, _, [<<"hello">>]} = stomp_receive(Client1, "MESSAGE"),
     ok.
 
+test_subscribe_with_queue_lease(Channel, Client, _Version) ->
+    rabbit_stomp_client:send(
+      Client, "SUBSCRIBE", [{"destination", ?DESTINATION}, {"x-expires", 12000}]),
+    {ok, Client1, _, _} = stomp_receive(Client, "RECEIPT"),
+
+    Args = [{<<"x-expires">>, long, 12000}],
+    #'queue.declare_ok'{} =
+        amqp_channel:call(Channel, #'queue.declare'{queue     = <<"TestQueue-x-expires">>,
+                                                    arguments = Args}),
+
+    Method = #'basic.publish'{exchange = <<"">>, routing_key = ?QUEUE},
+
+    amqp_channel:call(Channel, Method, #amqp_msg{props = #'P_basic'{},
+                                                 payload = <<"hello">>}),
+
+    {ok, _Client2, _, [<<"hello">>]} = stomp_receive(Client1, "MESSAGE"),
+    ok.
+
 test_unsubscribe_ack(Channel, Client, Version) ->
     #'queue.declare_ok'{} =
         amqp_channel:call(Channel, #'queue.declare'{queue       = ?QUEUE,
