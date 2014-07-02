@@ -954,20 +954,14 @@ id_from(Frame) ->
             rabbit_guid:gen_secure()
     end.
 
-maybe_add_per_queue_message_ttl_argument(Header, Frame, Proplist) ->
-    case rabbit_stomp_frame:integer_header(Frame, Header) of
-      {ok, Val} ->
-            [{<<"x-message-ttl">>, long, Val} | Proplist];
-      not_found ->
-            Proplist
-    end.
-
-maybe_add_queue_ttl_argument(Header, Frame, Proplist) ->
-    case rabbit_stomp_frame:integer_header(Frame, Header) of
-      {ok, Val} ->
-            [{<<"x-expires">>, long, Val} | Proplist];
-      not_found ->
-            Proplist
+header_to_argument_converter(Arg, ArgType) ->
+    fun (Header, Frame, Proplist) ->
+            case rabbit_stomp_frame:integer_header(Frame, Header) of
+                {ok, Val} ->
+                    [{Arg, ArgType, Val} | Proplist];
+                not_found ->
+                    Proplist
+            end
     end.
 
 queue_attributes_for(Frame) ->
@@ -978,9 +972,9 @@ queue_attributes_for(Frame) ->
 queue_arguments_for(Frame) ->
     lists:foldl(fun ({Header, F}, Acc) -> F(Header, Frame, Acc) end,
                 [], [{?HEADER_MESSAGE_TTL,
-                      fun maybe_add_per_queue_message_ttl_argument/3},
+                      header_to_argument_converter(<<"x-message-ttl">>, long)},
                      {?HEADER_QUEUE_TTL,
-                      fun maybe_add_queue_ttl_argument/3}]).
+                      header_to_argument_converter(<<"x-expires">>, long)}]).
 
 ensure_endpoint(_Direction, {queue, []}, _Frame, _Channel, _RoutingState) ->
     {error, {invalid_destination, "Destination cannot be blank"}};
