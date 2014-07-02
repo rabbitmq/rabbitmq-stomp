@@ -438,7 +438,7 @@ class TestDurableSubscription(base.BaseTest):
                 self.conn.send("msg" + str(x), destination=d)
 
             self.assertTrue(self.listener.await(7))
-            self.assertIn(len(self.listener.messages), range(100, 200))
+            self.assertEquals(len(self.listener.messages), 100)
         finally:
             conn2.stop()
 
