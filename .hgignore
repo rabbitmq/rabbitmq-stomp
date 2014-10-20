@@ -1,6 +1,7 @@
 ~$
 \.beam$
 ^build/
+^deps/stomppy/stomppy
 ^dist/
 ^cover/
 ^erl_crash.dump$

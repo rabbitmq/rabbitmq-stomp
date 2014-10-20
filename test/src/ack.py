@@ -35,7 +35,7 @@ class TestAck(base.BaseTest):
             mid = listener2.messages[1]['headers']['message-id']
             conn2.ack({'message-id':mid})
         finally:
-            conn2.stop()
+            conn2.disconnect()
 
         # now reconnect again, shouldn't see the message
         conn3 = self.create_connection()
@@ -46,7 +46,7 @@ class TestAck(base.BaseTest):
             self.assertFalse(listener3.await(3),
                              "unexpected message. ACK not working?")
         finally:
-            conn3.stop()
+            conn3.disconnect()
 
     def test_ack_client_individual(self):
         d = "/queue/ack-test-individual"
@@ -85,7 +85,7 @@ class TestAck(base.BaseTest):
             self.assertTrue(mid, "Did not find test2 message id.")
             conn2.ack({'message-id':mid})
         finally:
-            conn2.stop()
+            conn2.disconnect()
 
         # now reconnect again, shouldn't see the message
         conn3 = self.create_connection()
@@ -99,7 +99,7 @@ class TestAck(base.BaseTest):
             self.assertEquals(1, len(listener3.messages), "Expecting exactly one message")
             self.assertEquals("test1", listener3.messages[0]['message'], "Unexpected message remains")
         finally:
-            conn3.stop()
+            conn3.disconnect()
 
     def test_ack_client_tx(self):
         d = "/queue/ack-test-tx"
@@ -132,7 +132,7 @@ class TestAck(base.BaseTest):
             #now commit
             conn2.commit(transaction=tx)
         finally:
-            conn2.stop()
+            conn2.disconnect()
 
         # now reconnect again, shouldn't see the message
         conn3 = self.create_connection()
@@ -143,7 +143,7 @@ class TestAck(base.BaseTest):
             self.assertFalse(listener3.await(3),
                              "unexpected message. TX ACK not working?")
         finally:
-            conn3.stop()
+            conn3.disconnect()
 
     def test_topic_prefetch(self):
         d = "/topic/prefetch-test"

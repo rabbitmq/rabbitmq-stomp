@@ -58,7 +58,7 @@ class TestLifecycle(base.BaseTest):
     def test_heartbeat_disconnects_client(self):
         ''' Test heart-beat disconnection'''
         self.conn.disconnect()
-        new_conn = self.create_connection(heartbeat="1500,0")
+        new_conn = self.create_connection(heartbeats=(1500,0))
         try:
             self.assertTrue(new_conn.is_connected())
             time.sleep(1)

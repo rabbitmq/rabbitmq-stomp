@@ -6,11 +6,20 @@ import threading
 
 class BaseTest(unittest.TestCase):
 
-   def create_connection(self, version=None, heartbeat=None):
-       conn = stomp.Connection(user="guest", passcode="guest",
-                               version=version, heartbeat=heartbeat)
+   def create_connection(self, version=None, heartbeats=(0,0)):
+       if version == None:
+          conntype = stomp.Connection
+       elif version == "1.0":
+          conntype = stomp.Connection10
+       elif version == "1.1":
+          conntype = stomp.Connection11
+       elif version == "1.2":
+          conntype = stomp.Connection12
+       else:
+          raise version
+       conn = conntype(heartbeats=heartbeats)
        conn.start()
-       conn.connect()
+       conn.connect("guest", "guest")
        return conn
 
    def create_subscriber_connection(self, dest):
@@ -30,6 +39,7 @@ class BaseTest(unittest.TestCase):
 
    def tearDown(self):
         if self.conn.is_connected():
+            self.conn.disconnect()
             self.conn.stop()
 
    def simple_test_send_rec(self, dest, route = None):
