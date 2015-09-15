@@ -589,45 +589,57 @@ do_subscribe(Destination, DestHdr, Frame,
                 rabbit_stomp_util:consumer_tag(Frame),
             case Prefetch of
                 undefined -> ok;
-                _         -> amqp_channel:call(
-                               Channel, #'basic.qos'{prefetch_count = Prefetch})
+                _         -> amqp_channel:call(Channel,
+                                               #'basic.qos'{
+                                                  prefetch_count = Prefetch
+                                                 })
             end,
-            ExchangeAndKey = rabbit_routing_util:parse_routing(Destination),
-            try
-                amqp_channel:subscribe(Channel,
-                                       #'basic.consume'{
-                                          queue        = Queue,
-                                          consumer_tag = ConsumerTag,
-                                          no_local     = false,
-                                          no_ack       = (AckMode == auto),
-                                          exclusive    = false,
-                                          arguments    = []},
-                                       self()),
-                ok = rabbit_routing_util:ensure_binding(
-                       Queue, ExchangeAndKey, Channel)
-            catch exit:Err ->
-                    %% it's safe to delete this queue, it was server-named
-                    %% and declared by us
-                    case Destination of
-                        {exchange, _} ->
-                            ok = maybe_clean_up_queue(Queue, State);
-                        {topic, _} ->
-                            ok = maybe_clean_up_queue(Queue, State);
-                        _ ->
-                            ok
+            case dict:find(ConsumerTag, Subs) of
+                {ok, _} ->
+                    Message = "Duplicated subscription identifier",
+                    Detail = "A subscription identified by '~s' alredy exists.",
+                    error(Message, Detail, [ConsumerTag]),
+                    send_error(Message, Detail, [ConsumerTag], State),
+                    flush_and_die(self());
+                error ->
+                    ExchangeAndKey =
+                        rabbit_routing_util:parse_routing(Destination),
+                    try
+                        amqp_channel:subscribe(Channel,
+                                               #'basic.consume'{
+                                                  queue        = Queue,
+                                                  consumer_tag = ConsumerTag,
+                                                  no_local     = false,
+                                                  no_ack       = (AckMode == auto),
+                                                  exclusive    = false,
+                                                  arguments    = []},
+                                               self()),
+                        ok = rabbit_routing_util:ensure_binding(
+                               Queue, ExchangeAndKey, Channel)
+                    catch exit:Err ->
+                        %% it's safe to delete this queue, it
+                        %% was server-named and declared by us
+                        case Destination of
+                            {exchange, _} ->
+                                ok = maybe_clean_up_queue(Queue, State);
+                            {topic, _} ->
+                                ok = maybe_clean_up_queue(Queue, State);
+                            _ ->
+                                ok
+                        end,
+                        exit(Err)
                     end,
-                    exit(Err)
-            end,
-            ok(State#state{subscriptions =
-                               dict:store(
-                                 ConsumerTag,
-                                 #subscription{dest_hdr    = DestHdr,
-                                               ack_mode    = AckMode,
-                                               multi_ack   = IsMulti,
-                                               description = Description},
-                                 Subs),
-                           route_state = RouteState1});
-        {error, _} = Err ->
+                    ok(State#state{subscriptions =
+                                       dict:store(
+                                       ConsumerTag,
+                                       #subscription{dest_hdr    = DestHdr,
+                                                     ack_mode    = AckMode,
+                                                     multi_ack   = IsMulti,
+                                                     description = Description},
+                                       Subs),
+                                   route_state = RouteState1})
+            end;
+            {error, _} = Err ->
             Err
     end.
 
