@@ -240,7 +240,7 @@ serialize(#stomp_frame{command = Command,
          Len > 0 -> [?HEADER_CONTENT_LENGTH ++ ":", integer_to_list(Len), ?LF];
          true    -> []
      end,
-     ?LF, BodyFragments, 0].
+     ?LF, BodyFragments, 0, ?LF].
 
 serialize_header({K, V}) when is_integer(V) -> hdr(escape(K), integer_to_list(V));
 serialize_header({K, V}) when is_boolean(V) -> hdr(escape(K), boolean_to_list(V));
