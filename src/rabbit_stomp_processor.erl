@@ -38,7 +38,7 @@
                 %% see rabbitmq/rabbitmq-stomp#39
                 trailing_lf, auth_mechanism, auth_login}).
 
--record(subscription, {dest_hdr, ack_mode, multi_ack, description}).
+-record(subscription, {dest_hdr, ack_mode, multi_ack, description, exclusive, queue, exchange, routing_key}).
 
 -define(FLUSH_TIMEOUT, 60000).
 
@@ -437,7 +437,7 @@ ack_action(Command, Frame,
 %%----------------------------------------------------------------------------
 %% Internal helpers for processing frames callbacks
 %%----------------------------------------------------------------------------
-server_cancel_consumer(ConsumerTag, State = #proc_state{subscriptions = Subs}) ->
+server_cancel_consumer(ConsumerTag, State = #proc_state{subscriptions = Subs, channel = Channel}) ->
     case dict:find(ConsumerTag, Subs) of
         error ->
             error("Server cancelled unknown subscription",
@@ -455,6 +455,7 @@ server_cancel_consumer(ConsumerTag, State = #proc_state{subscriptions = Subs}) -
                              "No more messages will be delivered for ~p.~n",
                              [Description],
                              State),
+            delete_binding(Channel, Subscription),
             tidy_canceled_subscription(ConsumerTag, Subscription,
                                        #stomp_frame{}, State)
     end.
@@ -481,6 +482,7 @@ cancel_subscription({ok, ConsumerTag, Description}, Frame,
                   [Description],
                   State);
         {ok, Subscription = #subscription{description = Descr}} ->
+            delete_binding(Channel, Subscription),
             case amqp_channel:call(Channel,
                                    #'basic.cancel'{
                                      consumer_tag = ConsumerTag}) of
@@ -493,6 +495,17 @@ cancel_subscription({ok, ConsumerTag, Description}, Frame,
                           [Descr],
                           State)
             end
+    end.
+
+delete_binding(Channel, #subscription{exclusive = Exclusive, queue = Queue, exchange = Exchange, routing_key = RoutingKey}) ->
+    case Exclusive of
+        true ->
+            amqp_channel:call(Channel,
+                              #'queue.unbind'{
+                                queue       = Queue,
+                                exchange    = list_to_binary(Exchange),
+                                routing_key = list_to_binary(RoutingKey)});
+        false -> undefined
     end.
 
 tidy_canceled_subscription(ConsumerTag, #subscription{dest_hdr = DestHdr},
@@ -667,8 +680,10 @@ do_subscribe(Destination, DestHdr, Frame,
                     send_error(Message, Detail, [ConsumerTag], State),
                     {stop, normal, close_connection(State)};
                 error ->
-                    ExchangeAndKey =
+                    {Exchange, RoutingKey} =
                         rabbit_routing_util:parse_routing(Destination),
+                    Exclusive =
+                        rabbit_stomp_frame:boolean_header(Frame, ?HEADER_EXCLUSIVE, false),
                     try
                         amqp_channel:subscribe(Channel,
                                                #'basic.consume'{
@@ -680,7 +695,7 @@ do_subscribe(Destination, DestHdr, Frame,
                                                   arguments    = []},
                                                self()),
                         ok = rabbit_routing_util:ensure_binding(
-                               Queue, ExchangeAndKey, Channel)
+                               Queue, {Exchange, RoutingKey}, Channel)
                     catch exit:Err ->
                             %% it's safe to delete this queue, it
                             %% was server-named and declared by us
@@ -700,7 +715,11 @@ do_subscribe(Destination, DestHdr, Frame,
                                          #subscription{dest_hdr    = DestHdr,
                                                        ack_mode    = AckMode,
                                                        multi_ack   = IsMulti,
-                                                       description = Description},
+                                                       description = Description,
+                                                       exclusive   = Exclusive,
+                                                       queue       = Queue,
+                                                       exchange    = Exchange,
+                                                       routing_key = RoutingKey},
                                          Subs),
                                    route_state = RouteState1})
             end;
